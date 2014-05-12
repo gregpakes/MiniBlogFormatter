@@ -18,6 +18,7 @@ namespace MiniBlogFormatter
         private Regex blogSpotUploadsRegex = new Regex("(href|src)=\"(([^\"]+)(blogspot)([^\"]+)/([^\"]+))\"");
         private Regex gistRegex = new Regex("\\[gist id=(\\d*)\\]");
 
+        private string oldDomain = "http://www.gregpakes.co.uk";
 
         public void Format(string originalFolderPath, string targetFolderPath)
         {
@@ -57,7 +58,7 @@ namespace MiniBlogFormatter
 
                     if (existingUrl != null)
                     {
-                        oldUrl = existingUrl.Replace("http://www.gregpakes.co.uk", string.Empty);
+                        oldUrl = existingUrl.Replace(oldDomain, string.Empty);
                     }
 
 
