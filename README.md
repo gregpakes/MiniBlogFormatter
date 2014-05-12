@@ -9,7 +9,7 @@ Current platforms supported:
 * DasBlog
 * Wordpress
 
-Wordpress
+#Wordpress
 
 I have changed the Wordpress support.  It is mostly specific to my blog, but it might be useful.
 
