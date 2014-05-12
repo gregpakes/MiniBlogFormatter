@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Web;
+using MiniBlogFormatter;
 
 public class Post
 {
@@ -34,4 +35,6 @@ public class Post
 
     public string[] Categories { get; set; }
     public List<Comment> Comments { get; set; }
+
+    public List<DownloadedImage> Images { get; set; }
 }

@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
 
 namespace MiniBlogFormatter
 {
@@ -10,12 +11,17 @@ namespace MiniBlogFormatter
             string categories = @"C:\dev\MiniBlogFormatter\myblogposts";
 
             // For both BlogEngine.NET and DasBlog
-            string origin = @"C:\dev\MiniBlogFormatter\myblogposts";
-            string destination = @"C:\dev\MiniBlogFormatter\formated";
+            string origin = @"C:\MiniBlogFormatter-master\WordpressExport";
+            string destination = @"C:\MiniBlogFormatter-master\Output";
 
 
             //BlogEngine(categories, folder, destination);
             Wordpress(origin, destination);
+
+#if DEBUG
+            Console.WriteLine("Finished");
+            Console.ReadKey();
+#endif
         }
 
         private static void DasBlog(string folder, string destination)

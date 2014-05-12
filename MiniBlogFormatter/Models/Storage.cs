@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Web;
 using System.Xml.Linq;
 using System.Xml.XPath;
+using MiniBlogFormatter;
 
 public static class Storage
 {
@@ -48,6 +50,22 @@ public static class Storage
         }
 
         doc.Save(file);
+    }
+
+    public static void SaveImages(List<DownloadedImage> images, string folder)
+    {
+        if (images.Count == 0)
+        {
+            return;
+        }
+
+        // Make sure folder exists
+        Directory.CreateDirectory(folder);
+
+        foreach (var image in images)
+        {
+            image.Image.Save(Path.Combine(folder, image.FileName));
+        }
     }
 
     public static Post LoadPost(string file)

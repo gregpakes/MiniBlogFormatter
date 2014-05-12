@@ -1,16 +1,23 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
+using System.Security.Policy;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Linq;
+using System.Xml.Linq;
 
 
 namespace MiniBlogFormatter
 {
     public class WordpressFormatter
     {
-        private Regex rxFiles = new Regex("(href|src)=\"(([^\"]+)(/content/binary/)([^\"]+))\"", RegexOptions.IgnoreCase);
+        private Regex wordPressUploadsRegex = new Regex("(href|src)=\"(([^\"]+)(/wp-content/uploads/)[\\d]{4}/[\\d]{2}/([^\"]+))\"", RegexOptions.IgnoreCase);
+        private Regex blogSpotUploadsRegex = new Regex("(href|src)=\"(([^\"]+)(blogspot)([^\"]+)/([^\"]+))\"");
+        private Regex gistRegex = new Regex("\\[gist id=(\\d*)\\]");
+
 
         public void Format(string originalFolderPath, string targetFolderPath)
         {
@@ -19,6 +26,7 @@ namespace MiniBlogFormatter
 
         private void FormatPosts(string originalFolderPath, string targetFolderPath)
         {
+            var oldPostList = new Dictionary<string, string>();
             foreach (string file in Directory.GetFiles(originalFolderPath, "*.xml"))
             {
                 XmlDocument docOrig = LoadDocument(file);
@@ -31,6 +39,28 @@ namespace MiniBlogFormatter
 
                 foreach (XmlNode entry in docOrig.SelectNodes("//item", nsm))
                 {
+                    // Only process if there is content
+                    var content = entry.SelectSingleNode("content:encoded", namespaceManager).InnerText;
+                    var postId = entry.SelectSingleNode("wp:post_id", namespaceManager).InnerText;
+                    var parentPost = int.Parse(entry.SelectSingleNode("wp:post_parent", namespaceManager).InnerText);
+
+                    Console.WriteLine("Processing post #{0}", postId);
+
+                    if (string.IsNullOrEmpty(content) || parentPost != 0)
+                    {
+                        Console.WriteLine("Skipping post #{0} - No content", postId);
+                        continue;
+                    }
+
+                    var existingUrl = entry.SelectSingleNode("link", namespaceManager).InnerText;
+                    string oldUrl = null;
+
+                    if (existingUrl != null)
+                    {
+                        oldUrl = existingUrl.Replace("http://www.gregpakes.co.uk", string.Empty);
+                    }
+
+
                     Post post = new Post();
                     XmlNodeList categories = entry.SelectNodes("category[@domain='category']");
                     List<string> resultCategories = new List<string>();
@@ -45,8 +75,10 @@ namespace MiniBlogFormatter
                     post.PubDate = DateTime.Parse(entry.SelectSingleNode("pubDate").InnerText);
                     post.LastModified = DateTime.Parse(entry.SelectSingleNode("pubDate").InnerText);
 
+                    var formattedContent = FormatFileReferences(content, post.ID);
 
-                    post.Content = FormatFileReferences(entry.SelectSingleNode("content:encoded", namespaceManager).InnerText);
+                    post.Images = formattedContent.ImageList;
+                    post.Content = formattedContent.Content;
                     post.Author = entry.SelectSingleNode("dc:creator", namespaceManager).InnerText;
                     post.IsPublished = ReadValue(entry.SelectSingleNode("wp:status", namespaceManager), "publish") == "publish";
 
@@ -56,11 +88,35 @@ namespace MiniBlogFormatter
                         FomartComment(ref post, comment, namespaceManager);
                     }
 
-
-                    string newFile = Path.Combine(targetFolderPath, entry.SelectSingleNode("wp:post_id", namespaceManager).InnerText + ".xml");
+                    string newFile = Path.Combine(targetFolderPath, postId + ".xml");
                     Storage.Save(post, newFile);
+
+                    var uploadPath = Path.Combine(targetFolderPath, "files", post.ID);
+                    Storage.SaveImages(post.Images, uploadPath);
+
+                    if (oldUrl != null)
+                    {
+                        oldPostList[oldUrl] = postId;
+                    }
                 }
             }
+            SaveOldPostMap(targetFolderPath, oldPostList);
+        }
+
+        private void SaveOldPostMap(string targetFolderPath, Dictionary<string, string> oldPostList)
+        {
+            var mapElement = new XElement("OldPostMap");
+            foreach (var key in oldPostList.Keys)
+            {
+                mapElement.Add(
+                    new XElement("OldPost",
+                        new XAttribute("oldUrl", key),
+                        new XAttribute("postId", oldPostList[key])
+                    )
+                );
+            }
+            var doc = new XDocument(mapElement);
+            doc.Save(Path.Combine(targetFolderPath, "oldPosts.map"));
         }
 
         private void FomartComment(ref Post post, XmlNode entry, XmlNamespaceManager namespaceManager)
@@ -77,14 +133,50 @@ namespace MiniBlogFormatter
             post.Comments.Add(comment);
         }
 
-        private string FormatFileReferences(string content)
+        private ContentWithAttachments FormatFileReferences(string content, string id)
         {
-            foreach (Match match in rxFiles.Matches(content))
+            var imageList = new List<DownloadedImage>();
+            foreach (Match match in wordPressUploadsRegex.Matches(content))
             {
-                content = content.Replace(match.Groups[2].Value, "/posts/files/" + match.Groups[5].Value);
+                var fileName = match.Groups[5].Value;
+                if (IsImageExtension(Path.GetExtension(fileName)))
+                {
+                    imageList.Add(new DownloadedImage(FormatterHelpers.GetImageFromUrl(match.Groups[2].Value), Uri.UnescapeDataString(fileName)));
+                    content = content.Replace(match.Groups[2].Value, "/posts/files/" + id + "/" + fileName);
+                }
             }
 
-            return content;
+            foreach (Match match in blogSpotUploadsRegex.Matches(content))
+            {
+                var fileName = match.Groups[6].Value;
+
+                if (IsImageExtension(Path.GetExtension(fileName)))
+                {
+                    imageList.Add(new DownloadedImage(FormatterHelpers.GetImageFromUrl(match.Groups[2].Value), Uri.UnescapeDataString(fileName)));
+                    content = content.Replace(match.Groups[2].Value, "/posts/files/" + id + "/" + fileName);
+                }
+            }
+
+            // Locate the Gists and replace them
+            foreach (Match match in gistRegex.Matches(content))
+            {
+                content = content.Replace(match.Groups[0].Value, "<script src=\"https://gist.github.com/gregpakes/" + match.Groups[1].Value + ".js\"></script>");
+            }
+
+            return new ContentWithAttachments(content, imageList);
+        }
+
+        private bool IsImageExtension(string extension)
+        {
+            switch (extension.ToLower())
+            {
+                case ".jpg":
+                case ".png":
+                case ".gif":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static XmlNamespaceManager LoadNamespaceManager(XmlDocument docOrig)
@@ -130,5 +222,51 @@ namespace MiniBlogFormatter
             }
         }
 
+
+        private class ContentWithAttachments
+        {
+            private readonly string _content;
+            private readonly List<DownloadedImage> _imageList;
+
+            public ContentWithAttachments(string content, List<DownloadedImage> imageList)
+            {
+                _content = content;
+                _imageList = imageList;
+            }
+
+            public List<DownloadedImage> ImageList
+            {
+                get { return _imageList; }
+            }
+
+            public string Content
+            {
+                get { return _content; }
+            }
+        }
     }
+
+    public class DownloadedImage
+    {
+        private readonly Image _image;
+        private readonly string _fileName;
+
+        public DownloadedImage(Image image, string fileName)
+        {
+            _image = image;
+            _fileName = fileName;
+        }
+
+        public Image Image
+        {
+            get { return _image; }
+        }
+
+        public string FileName
+        {
+            get { return _fileName; }
+        }
+    }
+
+
 }
